@@ -1,12 +1,15 @@
 'use strict';
+import * as fs from 'fs-extra';
+import { EOL } from 'os';
+import * as path from 'path';
 import * as vscode from 'vscode';
+import { Disposable, workspace } from 'vscode';
 import * as settings from '../common/configSettings';
 import { Commands, PythonLanguage } from '../common/constants';
-import { EOL } from 'os';
-let path = require('path');
-let terminal: vscode.Terminal;
+import { ContextKey } from '../common/contextKey';
 import { IS_WINDOWS } from '../common/utils';
 
+let terminal: vscode.Terminal;
 export function activateExecInTerminalProvider(): vscode.Disposable[] {
     const disposables: vscode.Disposable[] = [];
     disposables.push(vscode.commands.registerCommand(Commands.Exec_In_Terminal, execInTerminal));
@@ -17,6 +20,7 @@ export function activateExecInTerminalProvider(): vscode.Disposable[] {
             terminal = null;
         }
     }));
+    disposables.push(new DjangoContextInitializer());
     return disposables;
 }
 
@@ -31,9 +35,10 @@ function removeBlankLines(code: string): string {
 }
 function execInTerminal(fileUri?: vscode.Uri) {
     const terminalShellSettings = vscode.workspace.getConfiguration('terminal.integrated.shell');
+    // tslint:disable-next-line:no-backbone-get-set-outside-model
     const IS_POWERSHELL = /powershell/.test(terminalShellSettings.get<string>('windows'));
 
-    let pythonSettings = settings.PythonSettings.getInstance(fileUri);
+    const pythonSettings = settings.PythonSettings.getInstance(fileUri);
     let filePath: string;
 
     let currentPythonPath = pythonSettings.pythonPath;
@@ -70,7 +75,8 @@ function execInTerminal(fileUri?: vscode.Uri) {
     terminal = terminal ? terminal : vscode.window.createTerminal(`Python`);
     if (pythonSettings.terminal && pythonSettings.terminal.executeInFileDir) {
         const fileDirPath = path.dirname(filePath);
-        if (fileDirPath !== vscode.workspace.rootPath && fileDirPath.substring(1) !== vscode.workspace.rootPath) {
+        const workspace = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(filePath));
+        if (workspace && fileDirPath !== workspace.uri.fsPath && fileDirPath.substring(1) !== workspace.uri.fsPath) {
             terminal.sendText(`cd "${fileDirPath}"`);
         }
     }
@@ -99,6 +105,7 @@ function execSelectionInTerminal() {
     }
 
     const terminalShellSettings = vscode.workspace.getConfiguration('terminal.integrated.shell');
+    // tslint:disable-next-line:no-backbone-get-set-outside-model
     const IS_POWERSHELL = /powershell/.test(terminalShellSettings.get<string>('windows'));
 
     let currentPythonPath = settings.PythonSettings.getInstance(activeEditor.document.uri).pythonPath;
@@ -120,12 +127,12 @@ function execSelectionInTerminal() {
     }
     code = removeBlankLines(code);
     const launchArgs = settings.PythonSettings.getInstance(activeEditor.document.uri).terminal.launchArgs;
-    const launchArgsString = launchArgs.length > 0 ? " ".concat(launchArgs.join(" ")) : "";
+    const launchArgsString = launchArgs.length > 0 ? ' '.concat(launchArgs.join(' ')) : '';
     const command = `${currentPythonPath}${launchArgsString}`;
     if (!terminal) {
         terminal = vscode.window.createTerminal(`Python`);
         if (IS_WINDOWS) {
-            const commandWin = command.replace(/\\/g, "/");
+            const commandWin = command.replace(/\\/g, '/');
             if (IS_POWERSHELL) {
                 terminal.sendText(`& ${commandWin}`);
             }
@@ -137,9 +144,9 @@ function execSelectionInTerminal() {
             terminal.sendText(command);
         }
     }
-    const unix_code = code.replace(/\r\n/g, "\n");
+    const unix_code = code.replace(/\r\n/g, '\n');
     if (IS_WINDOWS) {
-        terminal.sendText(unix_code.replace(/\n/g, "\r\n"));
+        terminal.sendText(unix_code.replace(/\n/g, '\r\n'));
     }
     else {
         terminal.sendText(unix_code);
@@ -154,6 +161,7 @@ function execSelectionInDjangoShell() {
     }
 
     const terminalShellSettings = vscode.workspace.getConfiguration('terminal.integrated.shell');
+    // tslint:disable-next-line:no-backbone-get-set-outside-model
     const IS_POWERSHELL = /powershell/.test(terminalShellSettings.get<string>('windows'));
 
     let currentPythonPath = settings.PythonSettings.getInstance(activeEditor.document.uri).pythonPath;
@@ -161,8 +169,10 @@ function execSelectionInDjangoShell() {
         currentPythonPath = `"${currentPythonPath}"`;
     }
 
-    const workspaceRoot = vscode.workspace.rootPath;
-    const djangoShellCmd = `"${workspaceRoot}/manage.py" shell`;
+    const workspaceUri = vscode.workspace.getWorkspaceFolder(activeEditor.document.uri);
+    const defaultWorkspace = Array.isArray(vscode.workspace.workspaceFolders) && vscode.workspace.workspaceFolders.length > 0 ? vscode.workspace.workspaceFolders[0].uri.fsPath : '';
+    const workspaceRoot = workspaceUri ? workspaceUri.uri.fsPath : defaultWorkspace;
+    const djangoShellCmd = `"${path.join(workspaceRoot, 'manage.py')}" shell`;
     const selection = vscode.window.activeTextEditor.selection;
     let code: string;
     if (selection.isEmpty) {
@@ -176,12 +186,12 @@ function execSelectionInDjangoShell() {
         return;
     }
     const launchArgs = settings.PythonSettings.getInstance(activeEditor.document.uri).terminal.launchArgs;
-    const launchArgsString = launchArgs.length > 0 ? " ".concat(launchArgs.join(" ")) : "";
+    const launchArgsString = launchArgs.length > 0 ? ' '.concat(launchArgs.join(' ')) : '';
     const command = `${currentPythonPath}${launchArgsString} ${djangoShellCmd}`;
     if (!terminal) {
         terminal = vscode.window.createTerminal(`Django Shell`);
         if (IS_WINDOWS) {
-            const commandWin = command.replace(/\\/g, "/");
+            const commandWin = command.replace(/\\/g, '/');
             if (IS_POWERSHELL) {
                 terminal.sendText(`& ${commandWin}`);
             }
@@ -193,12 +203,69 @@ function execSelectionInDjangoShell() {
             terminal.sendText(command);
         }
     }
-    const unix_code = code.replace(/\r\n/g, "\n");
+    const unix_code = code.replace(/\r\n/g, '\n');
     if (IS_WINDOWS) {
-        terminal.sendText(unix_code.replace(/\n/g, "\r\n"));
+        terminal.sendText(unix_code.replace(/\n/g, '\r\n'));
     }
     else {
         terminal.sendText(unix_code);
     }
     terminal.show();
+}
+
+
+class DjangoContextInitializer implements vscode.Disposable {
+    private isDjangoProject: ContextKey;
+    private monitoringActiveTextEditor: boolean;
+    private workspaceContextKeyValues = new Map<string, boolean>();
+    private lastCheckedWorkspace: string;
+    private disposables: Disposable[] = [];
+    constructor() {
+        this.isDjangoProject = new ContextKey('python.isDjangoProject');
+        this.ensureState();
+        this.disposables.push(vscode.workspace.onDidChangeWorkspaceFolders(() => this.updateContextKeyBasedOnActiveWorkspace()));
+    }
+
+    public dispose() {
+        this.isDjangoProject = null;
+        this.disposables.forEach(disposable => disposable.dispose());
+    }
+    private updateContextKeyBasedOnActiveWorkspace() {
+        if (this.monitoringActiveTextEditor) {
+            return;
+        }
+        this.monitoringActiveTextEditor = true;
+        this.disposables.push(vscode.window.onDidChangeActiveTextEditor(() => this.ensureState()));
+    }
+    private getActiveWorkspace(): string | undefined {
+        if (!Array.isArray(workspace.workspaceFolders || workspace.workspaceFolders.length === 0)) {
+            return undefined;
+        }
+        if (workspace.workspaceFolders.length === 1) {
+            return workspace.workspaceFolders[0].uri.fsPath;
+        }
+        const activeEditor = vscode.window.activeTextEditor;
+        if (!activeEditor) {
+            return undefined;
+        }
+        const workspaceFolder = vscode.workspace.getWorkspaceFolder(activeEditor.document.uri);
+        return workspaceFolder ? workspaceFolder.uri.fsPath : undefined;
+    }
+    private async ensureState(): Promise<void> {
+        const activeWorkspace = this.getActiveWorkspace();
+        if (!activeWorkspace) {
+            return await this.isDjangoProject.set(false);
+        }
+        if (this.lastCheckedWorkspace === activeWorkspace) {
+            return;
+        }
+        if (this.workspaceContextKeyValues.has(activeWorkspace)) {
+            await this.isDjangoProject.set(this.workspaceContextKeyValues.get(activeWorkspace));
+        } else {
+            const exists = await fs.pathExists(path.join(activeWorkspace, 'manage.py'));
+            await this.isDjangoProject.set(exists);
+            this.workspaceContextKeyValues.set(activeWorkspace, exists);
+            this.lastCheckedWorkspace = activeWorkspace;
+        }
+    }
 }
