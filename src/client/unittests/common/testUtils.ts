@@ -1,9 +1,29 @@
-import {TestFolder, TestsToRun, Tests, TestFile, TestSuite, TestStatus, FlattenedTestFunction, FlattenedTestSuite} from './contracts';
-import * as vscode from 'vscode';
 import * as path from 'path';
+import * as vscode from 'vscode';
+import { Uri, workspace } from 'vscode';
 import * as constants from '../../common/constants';
+import { FlattenedTestFunction, FlattenedTestSuite, TestFile, TestFolder, Tests, TestStatus, TestsToRun, TestSuite } from './contracts';
 
-let discoveredTests: Tests;
+const testsIndexedByWorkspaceUri = new Map<string, Tests>();
+
+function getWorkspaceFolderPath(resource?: Uri): string | undefined {
+    if (!resource) {
+        return undefined;
+    }
+    const folder = workspace.getWorkspaceFolder(resource);
+    return folder ? folder.uri.path : undefined;
+}
+export async function getTestWorkspace(): Promise<Uri | undefined> {
+    if (!Array.isArray(workspace.workspaceFolders) || workspace.workspaceFolders.length === 0) {
+        return undefined;
+    } else if (workspace.workspaceFolders.length === 1) {
+        return workspace.workspaceFolders[0].uri;
+    } else {
+        // tslint:disable-next-line:no-any prefer-type-cast
+        const workspaceFolder = await (window as any).showWorkspaceFolderPick({ placeHolder: 'Select a workspace' });
+        return workspace ? workspaceFolder.uri : undefined;
+    }
+}
 
 export function displayTestErrorMessage(message: string) {
     vscode.window.showErrorMessage(message, constants.Button_Text_Tests_View_Output).then(action => {
@@ -13,28 +33,30 @@ export function displayTestErrorMessage(message: string) {
     });
 
 }
-export function getDiscoveredTests(): Tests {
-    return discoveredTests;
+export function getDiscoveredTests(resource?: Uri): Tests {
+    const workspaceFolder = getWorkspaceFolderPath(resource) || '';
+    return testsIndexedByWorkspaceUri.has(workspaceFolder) ? testsIndexedByWorkspaceUri.get(workspaceFolder) : undefined;
 }
-export function storeDiscoveredTests(tests: Tests) {
-    discoveredTests = tests;
+export function storeDiscoveredTests(tests: Tests, resource?: Uri) {
+    const workspaceFolder = getWorkspaceFolderPath(resource) || '';
+    testsIndexedByWorkspaceUri.set(workspaceFolder, tests);
 }
 
 export function resolveValueAsTestToRun(name: string, rootDirectory: string): TestsToRun {
-    // TODO: We need a better way to match (currently we have raw name, name, xmlname, etc = which one do we
+    // TODO: We need a better way to match (currently we have raw name, name, xmlname, etc = which one do we.
     // use to identify a file given the full file name, similary for a folder and function
     // Perhaps something like a parser or methods like TestFunction.fromString()... something)
-    let tests = getDiscoveredTests();
+    const tests = getDiscoveredTests();
     if (!tests) { return null; }
     const absolutePath = path.isAbsolute(name) ? name : path.resolve(rootDirectory, name);
-    let testFolders = tests.testFolders.filter(folder => folder.nameToRun === name || folder.name === name || folder.name === absolutePath);
-    if (testFolders.length > 0) { return { testFolder: testFolders }; };
+    const testFolders = tests.testFolders.filter(folder => folder.nameToRun === name || folder.name === name || folder.name === absolutePath);
+    if (testFolders.length > 0) { return { testFolder: testFolders }; }
 
-    let testFiles = tests.testFiles.filter(file => file.nameToRun === name || file.name === name || file.fullPath === absolutePath);
-    if (testFiles.length > 0) { return { testFile: testFiles }; };
+    const testFiles = tests.testFiles.filter(file => file.nameToRun === name || file.name === name || file.fullPath === absolutePath);
+    if (testFiles.length > 0) { return { testFile: testFiles }; }
 
-    let testFns = tests.testFunctions.filter(fn => fn.testFunction.nameToRun === name || fn.testFunction.name === name).map(fn => fn.testFunction);
-    if (testFns.length > 0) { return { testFunction: testFns }; };
+    const testFns = tests.testFunctions.filter(fn => fn.testFunction.nameToRun === name || fn.testFunction.name === name).map(fn => fn.testFunction);
+    if (testFns.length > 0) { return { testFunction: testFns }; }
 
     // Just return this as a test file
     return <TestsToRun>{ testFile: [{ name: name, nameToRun: name, functions: [], suites: [], xmlName: name, fullPath: '', time: 0 }] };
@@ -45,7 +67,7 @@ export function extractBetweenDelimiters(content: string, startDelimiter: string
 }
 
 export function convertFileToPackage(filePath: string): string {
-    let lastIndex = filePath.lastIndexOf('.');
+    const lastIndex = filePath.lastIndexOf('.');
     return filePath.substring(0, lastIndex).replace(/\//g, '.').replace(/\\/g, '.');
 }
 
@@ -63,8 +85,7 @@ export function updateFolderResultsUpstream(testFolder: TestFolder) {
             if (!fl.passed) {
                 allFilesPassed = false;
             }
-        }
-        else {
+        } else {
             allFilesRan = false;
         }
 
@@ -81,8 +102,7 @@ export function updateFolderResultsUpstream(testFolder: TestFolder) {
             if (!folder.passed) {
                 allFoldersPassed = false;
             }
-        }
-        else {
+        } else {
             allFoldersRan = false;
         }
 
@@ -93,8 +113,7 @@ export function updateFolderResultsUpstream(testFolder: TestFolder) {
     if (allFilesRan && allFoldersRan) {
         testFolder.passed = allFilesPassed && allFoldersPassed;
         testFolder.status = testFolder.passed ? TestStatus.Idle : TestStatus.Fail;
-    }
-    else {
+    } else {
         testFolder.passed = null;
         testFolder.status = TestStatus.Unknown;
     }
@@ -110,13 +129,11 @@ export function updateResultsUpstream(test: TestSuite | TestFile) {
         if (typeof fn.passed === 'boolean') {
             if (fn.passed) {
                 test.functionsPassed += 1;
-            }
-            else {
+            } else {
                 test.functionsFailed += 1;
                 allFunctionsPassed = false;
             }
-        }
-        else {
+        } else {
             allFunctionsRan = false;
         }
     });
@@ -131,8 +148,7 @@ export function updateResultsUpstream(test: TestSuite | TestFile) {
             if (!suite.passed) {
                 allSuitesPassed = false;
             }
-        }
-        else {
+        } else {
             allSuitesRan = false;
         }
 
@@ -144,8 +160,7 @@ export function updateResultsUpstream(test: TestSuite | TestFile) {
     if (allSuitesRan && allFunctionsRan) {
         test.passed = allFunctionsPassed && allSuitesPassed;
         test.status = test.passed ? TestStatus.Idle : TestStatus.Error;
-    }
-    else {
+    } else {
         test.passed = null;
         test.status = TestStatus.Unknown;
     }
@@ -155,7 +170,7 @@ export function placeTestFilesInFolders(tests: Tests) {
     // First get all the unique folders
     const folders: string[] = [];
     tests.testFiles.forEach(file => {
-        let dir = path.dirname(file.name);
+        const dir = path.dirname(file.name);
         if (folders.indexOf(dir) === -1) {
             folders.push(dir);
         }
@@ -178,8 +193,7 @@ export function placeTestFilesInFolders(tests: Tests) {
                 folderMap.set(newPath, testFolder);
                 if (parentFolder) {
                     parentFolder.folders.push(testFolder);
-                }
-                else {
+                } else {
                     tests.rootTestFolders.push(testFolder);
                 }
                 tests.testFiles.filter(fl => path.dirname(fl.name) === newPath).forEach(testFile => {
@@ -192,8 +206,8 @@ export function placeTestFilesInFolders(tests: Tests) {
     });
 }
 export function flattenTestFiles(testFiles: TestFile[]): Tests {
-    let fns: FlattenedTestFunction[] = [];
-    let suites: FlattenedTestSuite[] = [];
+    const fns: FlattenedTestFunction[] = [];
+    const suites: FlattenedTestSuite[] = [];
     testFiles.forEach(testFile => {
         // sample test_three (file name without extension and all / replaced with ., meaning this is the package)
         const packageName = convertFileToPackage(testFile.name);
@@ -208,7 +222,7 @@ export function flattenTestFiles(testFiles: TestFile[]): Tests {
         });
     });
 
-    let tests = <Tests>{
+    const tests = <Tests>{
         testFiles: testFiles,
         testFunctions: fns, testSuits: suites,
         testFolders: [],
