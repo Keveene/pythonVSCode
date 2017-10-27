@@ -78,6 +78,24 @@ export class CondaEnvService implements IInterpreterLocatorService {
             // tslint:disable-next-line:no-non-null-assertion
             .then(interpreters => interpreters.map(interpreter => interpreter!));
     }
+    public getDisplayName(info: CondaInfo) {
+        const condaVersion = info.conda_version || '';
+        const pythonVersion = this.getDisplayVersion(info.python_version);
+        const bitness = this.getBitnessDisplayName(info.platform);
+        const bitnesAndVersion = [bitness, pythonVersion].filter(item => item.length > 0).join(', ');
+
+        if (condaVersion.length === 0 && pythonVersion.length === 0 && bitnesAndVersion.length === 0) {
+            const sysVersion = info['sys.version'];
+            if (typeof sysVersion === 'string') {
+                return this.getDisplayNameFromSysVersion(sysVersion);
+            }
+        }
+
+        return [AnacondaCompanyName, condaVersion, bitnesAndVersion.length > 0 ? `(${bitnesAndVersion})` : '']
+            .filter(item => item.length > 0)
+            .join(' ')
+            .trim();
+    }
     private getSuggestionsFromConda(): Promise<PythonInterpreter[]> {
         return this.getCondaFile()
             .then(condaFile => {
@@ -115,19 +133,21 @@ export class CondaEnvService implements IInterpreterLocatorService {
         }
         return AnacondaDisplayName;
     }
-    private getDisplayName(info: CondaInfo) {
-        const sysVersion = info['sys.version'];
-        if (typeof sysVersion === 'string') {
-            return this.getDisplayNameFromSysVersion(sysVersion);
+    private getDisplayVersion(value: string = '') {
+        return value.split('.')
+            .filter((_, index) => index < 3)
+            .join('.');
+    }
+    private getBitnessDisplayName(value: string = '') {
+        const parsedValue = value.indexOf('-') > 0 ? value.split('-')[1] : value;
+        const x64Values = ['64', 'x86', 'x86_64'];
+        if (x64Values.some(item => value.indexOf(item) >= 0)) {
+            return '64 bit';
         }
-
-        const version = info.conda_version || '';
-        const pythonVersion = info.python_version || '';
-        const platform = info.platform || '';
-        const platFormAndVersion = [platform, pythonVersion].filter(item => item.length > 0).join(', ');
-
-        return [AnacondaCompanyName, version, platFormAndVersion.length > 0 ? `(${platFormAndVersion})` : '']
-            .filter(item => item.length > 0)
-            .join(' ');
+        const x86Values = ['32', 'i686', 'i386'];
+        if (x86Values.some(item => value.indexOf(item) >= 0)) {
+            return '32 bit';
+        }
+        return value;
     }
 }
