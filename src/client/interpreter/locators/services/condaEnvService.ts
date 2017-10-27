@@ -11,6 +11,9 @@ type CondaInfo = {
     envs?: string[];
     'sys.version'?: string;
     default_prefix?: string;
+    conda_version?: string;
+    python_version?: string;
+    platform?: string;
 };
 export class CondaEnvService implements IInterpreterLocatorService {
     constructor(private registryLookupForConda?: IInterpreterLocatorService) {
@@ -47,8 +50,7 @@ export class CondaEnvService implements IInterpreterLocatorService {
         }
     }
     public async parseCondaInfo(info: CondaInfo) {
-        // "sys.version": "3.6.1 |Anaconda 4.4.0 (64-bit)| (default, May 11 2017, 13:25:24) [MSC v.1900 64 bit (AMD64)]".
-        const displayName = this.getDisplayNameFromVersionInfo(info['sys.version'] || '');
+        const displayName = this.getDisplayName(info);
 
         // The root of the conda environment is itself a Python interpreter
         // envs reported as e.g.: /Users/bob/miniconda3/envs/someEnv.
@@ -101,7 +103,8 @@ export class CondaEnvService implements IInterpreterLocatorService {
                 });
             });
     }
-    private getDisplayNameFromVersionInfo(versionInfo: string = '') {
+    private getDisplayNameFromSysVersion(versionInfo: string = '') {
+        // "sys.version": "3.6.1 |Anaconda 4.4.0 (64-bit)| (default, May 11 2017, 13:25:24) [MSC v.1900 64 bit (AMD64)]".
         if (!versionInfo) {
             return AnacondaDisplayName;
         }
@@ -111,5 +114,20 @@ export class CondaEnvService implements IInterpreterLocatorService {
             return versionParts[1];
         }
         return AnacondaDisplayName;
+    }
+    private getDisplayName(info: CondaInfo) {
+        const sysVersion = info['sys.version'];
+        if (typeof sysVersion === 'string') {
+            return this.getDisplayNameFromSysVersion(sysVersion);
+        }
+
+        const version = info.conda_version || '';
+        const pythonVersion = info.python_version || '';
+        const platform = info.platform || '';
+        const platFormAndVersion = [platform, pythonVersion].filter(item => item.length > 0).join(', ');
+
+        return [AnacondaCompanyName, version, platFormAndVersion.length > 0 ? `(${platFormAndVersion})` : '']
+            .filter(item => item.length > 0)
+            .join(' ');
     }
 }
